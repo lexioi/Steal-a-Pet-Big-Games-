@@ -2,15 +2,49 @@ if not game:IsLoaded() then
     game.Loaded:Wait()
 end
 
-local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
-local ESPEnabled, InstantEnabled = false, false
+local ESPEnabled, InstantEnabled, AutoCollectEnabled = false, false, false
 local Highlights = {}
-local InstantConn = nil
+local InstantConn = nil -- To store the connection for Instant Prompts
+local AutoCollectTimer = nil
+local OriginalCFrame = nil -- To store the player's original position before teleporting
 
+-- Find the player's specific plot (using the logic from your provided base script)
+local things_folder = Workspace:FindFirstChild("__THINGS")
+if not things_folder then
+    warn("Things folder not found! Some features might not work.")
+end
+
+local playerPlot = nil -- Renamed to avoid conflict with `plot` variable in AutoCollectPets
+local plots_folder_global = nil -- Store this for easier access in AutoCollectPets (though now mostly for playerPlot finding)
+
+if things_folder then
+    plots_folder_global = things_folder:FindFirstChild("Plots")
+    if not plots_folder_global then
+        warn("Plots folder not found! Some features might not work.")
+    else
+        for _, v in plots_folder_global:GetDescendants() do
+            if v.Name == "DisplayName" and v:IsA("TextLabel") and v.Text:find(LocalPlayer.DisplayName) then
+                -- Based on your original script's v.Parent.Parent.Parent.Parent
+                -- This path is critical for finding *your* plot. If issues, check the Explorer view.
+                playerPlot = v.Parent.Parent.Parent.Parent
+                if playerPlot and playerPlot:IsA("Model") then
+                    print("Found LocalPlayer's plot:", playerPlot.Name)
+                else
+                    warn("LocalPlayer's plot found but not a Model or path is incorrect.")
+                    playerPlot = nil
+                end
+                break
+            end
+        end
+    end
+end
+
+-- GUI Setup
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "LexioiGUI"
 screenGui.ResetOnSpawn = false
@@ -19,7 +53,7 @@ screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0, 180, 0, 40)
-toggleButton.Position = UDim2.new(0, 150, 0, 60)  -- чуть ниже сверху
+toggleButton.Position = UDim2.new(0, 150, 0, 60)
 toggleButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 toggleButton.TextColor3 = Color3.new(1, 1, 1)
 toggleButton.Text = "Open GUI"
@@ -30,7 +64,7 @@ toggleButton.Draggable = true
 toggleButton.Parent = screenGui
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 250, 0, 280)
+mainFrame.Size = UDim2.new(0, 500, 0, 280)
 mainFrame.Position = UDim2.new(0, 150, 0, 100)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainFrame.BorderSizePixel = 0
@@ -49,153 +83,256 @@ title.TextSize = 20
 title.Parent = mainFrame
 
 local function CreateButton(name, posY, callback, toggle)
-	local button = Instance.new("TextButton")
-	button.Size = UDim2.new(0, 230, 0, 30)
-	button.Position = UDim2.new(0, 10, 0, posY)
-	button.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-	button.TextColor3 = Color3.new(1, 1, 1)
-	button.Font = Enum.Font.Gotham
-	button.TextSize = 16
-	button.Text = name .. (toggle and " (OFF)" or "")
-	button.Parent = mainFrame
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 230, 0, 30)
+    button.Position = UDim2.new(0, 10, 0, posY)
+    button.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Font = Enum.Font.Gotham
+    button.TextSize = 16
+    button.Text = name .. (toggle and " (OFF)" or "")
+    button.Parent = mainFrame
 
-	button.MouseButton1Click:Connect(function()
-		local on = callback()
-		if toggle then
-			button.BackgroundColor3 = on and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-			button.Text = name .. (on and " (ON)" or " (OFF)")
-		end
-		-- Для не-toggle кнопок цвет и текст не меняется
-	end)
-	return button
-end
-
--- Поиск базы игрока по DisplayName
-local function GetPlayerPlot()
-	local things_folder = Workspace:FindFirstChild("__THINGS")
-	if not things_folder then return nil end
-	local plots = things_folder:FindFirstChild("Plots")
-	if not plots then return nil end
-
-	for _, v in pairs(plots:GetDescendants()) do
-		if v.Name == "DisplayName" and v:IsA("TextLabel") and v.Text:find(LocalPlayer.DisplayName) then
-			-- Возвращаем модель участка (на 4 уровня выше от DisplayName)
-			local plot = v:FindFirstAncestorOfClass("Model")
-			if plot then
-				return plot
-			end
-		end
-	end
-	return nil
+    button.MouseButton1Click:Connect(function()
+        local on = callback()
+        if toggle then
+            button.BackgroundColor3 = on and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+            button.Text = name .. (on and " (ON)" or " (OFF)")
+        end
+    end)
+    return button
 end
 
 -- ESP
 local function ToggleESP()
-	ESPEnabled = not ESPEnabled
+    ESPEnabled = not ESPEnabled
 
-	for _, obj in pairs(Highlights) do
-		if obj.Highlight then obj.Highlight:Destroy() end
-		if obj.Billboard then obj.Billboard:Destroy() end
-	end
-	table.clear(Highlights)
+    for _, obj in pairs(Highlights) do
+        if obj.Highlight then obj.Highlight:Destroy() end
+        if obj.Billboard then obj.Billboard:Destroy() end
+    end
+    table.clear(Highlights)
 
-	if ESPEnabled then
-		for _, player in ipairs(Players:GetPlayers()) do
-			if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-				local highlight = Instance.new("Highlight")
-				highlight.Adornee = player.Character
-				highlight.FillColor = Color3.fromRGB(255, 0, 0)
-				highlight.OutlineColor = Color3.new(1, 1, 1)
-				highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-				highlight.Parent = screenGui
+    if ESPEnabled then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local highlight = Instance.new("Highlight")
+                highlight.Adornee = player.Character
+                highlight.FillColor = Color3.fromRGB(255, 0, 0)
+                highlight.OutlineColor = Color3.new(1, 1, 1)
+                highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                highlight.Parent = screenGui
 
-				local billboard = Instance.new("BillboardGui")
-				billboard.Name = "ESP_Name"
-				billboard.Adornee = player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
-				billboard.Size = UDim2.new(0, 200, 0, 50)
-				billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-				billboard.AlwaysOnTop = true
-				billboard.Parent = screenGui
+                local billboard = Instance.new("BillboardGui")
+                billboard.Name = "ESP_Name"
+                billboard.Adornee = player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
+                billboard.Size = UDim2.new(0, 200, 0, 50)
+                billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+                billboard.AlwaysOnTop = true
+                billboard.Parent = screenGui
 
-				local label = Instance.new("TextLabel", billboard)
-				label.Size = UDim2.new(1, 0, 1, 0)
-				label.BackgroundTransparency = 1
-				label.Text = player.DisplayName
-				label.TextColor3 = Color3.new(1, 1, 1)
-				label.Font = Enum.Font.GothamBold
-				label.TextScaled = true
+                local label = Instance.new("TextLabel", billboard)
+                label.Size = UDim2.new(1, 0, 1, 0)
+                label.BackgroundTransparency = 1
+                label.Text = player.DisplayName
+                label.TextColor3 = Color3.new(1, 1, 1)
+                label.Font = Enum.Font.GothamBold
+                label.TextScaled = true
 
-				table.insert(Highlights, {Highlight = highlight, Billboard = billboard})
-			end
-		end
-	end
-
-	return ESPEnabled
+                table.insert(Highlights, {Highlight = highlight, Billboard = billboard})
+            end
+        end
+    end
+    return ESPEnabled
 end
 
 -- Instant Buttons
 local function ToggleInstant()
-	InstantEnabled = not InstantEnabled
+    InstantEnabled = not InstantEnabled
 
-	if InstantEnabled then
-		InstantConn = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
-			prompt.HoldDuration = 0
-		end)
-	else
-		if InstantConn then
-			InstantConn:Disconnect()
-			InstantConn = nil
-		end
-	end
-
-	return InstantEnabled
+    if InstantEnabled then
+        -- Connect if not already connected (from user's base script logic)
+        if not InstantConn then
+            InstantConn = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+                prompt.HoldDuration = 0
+            end)
+            -- The PromptButtonHoldEnded connection from the base script is less relevant for a general GUI toggle,
+            -- as it specifically teleports to CollectPart. We handle TeleportToBase separately.
+            -- So, just setting HoldDuration to 0 is enough for "instant".
+        end
+    else
+        if InstantConn then
+            InstantConn:Disconnect()
+            InstantConn = nil
+        end
+    end
+    return InstantEnabled
 end
 
--- Телепорт к базе игрока (CollectPart)
+-- Teleport to Base (CollectPart)
 local function TeleportToBase()
-	local plot = GetPlayerPlot()
-	if plot and plot:FindFirstChild("CollectPart") then
-		local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if root then
-			root.CFrame = plot.CollectPart.CFrame + Vector3.new(0, 3, 0)
-			return true
-		end
-	end
-	return false
+    if playerPlot then
+        local collectPart = playerPlot:FindFirstChild("CollectPart")
+        if collectPart then
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.CFrame = collectPart.CFrame + Vector3.new(0, 3, 0)
+                print("Teleported to player's base CollectPart.")
+                return true
+            end
+        else
+            warn("CollectPart not found in player's plot.")
+        end
+    else
+        warn("Player's plot not found for TeleportToBase.")
+    end
+    return false
 end
 
--- Телепорт к LockButton базы игрока
+-- Teleport to LockButton of player's base
 local function TeleportToLockButton()
-	local plot = GetPlayerPlot()
-	if plot and plot:FindFirstChild("LockButton") then
-		local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if root then
-			root.CFrame = plot.LockButton.CFrame + Vector3.new(0, 3, 0)
-			return true
-		end
-	end
-	return false
+    if playerPlot then
+        local lockButton = playerPlot:FindFirstChild("LockButton")
+        if lockButton then
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.CFrame = lockButton.CFrame + Vector3.new(0, 3, 0)
+                print("Teleported to player's base LockButton.")
+                return true
+            end
+        else
+            warn("LockButton not found in player's plot.")
+        end
+    else
+        warn("Player's plot not found for TeleportToLockButton.")
+    end
+    return false
 end
 
--- Кнопки
+-- Auto Collect function (MODIFIED to teleport ONTO the "Button" part within the stand model)
+local function AutoCollectPets()
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        warn("AutoCollect: HumanoidRootPart not found for LocalPlayer.Character.")
+        return
+    end
+
+    -- Only store OriginalCFrame if it's not already stored (first run of a cycle)
+    if not OriginalCFrame then
+        OriginalCFrame = root.CFrame
+        print("AutoCollect: Stored original CFrame:", OriginalCFrame)
+    end
+
+    if not playerPlot then -- Now only checking playerPlot, not all plots
+        warn("AutoCollect: Player's plot not found. Cannot collect from your base.")
+        return
+    end
+
+    print("AutoCollect: Starting teleport cycle through stands 1-20 on YOUR base ("..playerPlot.Name..").")
+    
+    local standsFolder = playerPlot:FindFirstChild("Stands")
+    if standsFolder then
+        local foundAnyStandInPlot = false
+        -- Now iterate through stand models named 1 to 20 within this plot's Stands folder
+        for standIndex = 1, 20 do
+            local standModel = standsFolder:FindFirstChild(tostring(standIndex))
+            if standModel and standModel:IsA("Model") then
+                local buttonPart = standModel:FindFirstChild("Button") -- Look for the "Button" part
+                if buttonPart and buttonPart:IsA("BasePart") then -- Ensure it's a part
+                    local targetCFrame = buttonPart.CFrame -- Get the CFrame of the "Button" part
+                    print("AutoCollect: Teleporting to stand '"..standIndex.."' in your plot at Button CFrame:", targetCFrame.Position)
+                    root.CFrame = targetCFrame + Vector3.new(0, 3, 0) -- Teleport 3 studs above the button
+                    foundAnyStandInPlot = true
+                    task.wait(0.5) -- Short wait at each stand for collection
+                else
+                    warn("AutoCollect: Stand '"..standIndex.."' in your plot found, but no 'Button' part found within it or it's not a BasePart.")
+                end
+            end
+        end
+        if not foundAnyStandInPlot then
+            print("AutoCollect: No valid stands (1-20) with a 'Button' part found within Stands folder in your plot.")
+        end
+    else
+        print("AutoCollect: No 'Stands' folder found in your plot.")
+    end
+
+    -- Teleport back to original position and clear stored CFrame for next cycle
+    if OriginalCFrame then
+        print("AutoCollect: Teleporting back to original CFrame:", OriginalCFrame)
+        root.CFrame = OriginalCFrame
+        OriginalCFrame = nil -- Clear it so it's re-stored at the start of the next cycle
+    else
+        warn("AutoCollect: OriginalCFrame was nil when attempting to return.")
+    end
+    print("AutoCollect: Finished teleport cycle.")
+end
+
+local function ToggleAutoCollect()
+    AutoCollectEnabled = not AutoCollectEnabled
+
+    if AutoCollectEnabled then
+        -- Perform an immediate collection sweep
+        AutoCollectPets()
+
+        -- Start the auto collect timer for subsequent sweeps
+        AutoCollectTimer = task.spawn(function()
+            while AutoCollectEnabled do
+                task.wait(600) -- Wait 10 minutes (600 seconds)
+                if AutoCollectEnabled then -- Double check in case it was disabled during the wait
+                    AutoCollectPets()
+                end
+            end
+        end)
+    else
+        -- Stop the auto collect timer
+        if AutoCollectTimer then
+            task.cancel(AutoCollectTimer)
+            AutoCollectTimer = nil
+        end
+        OriginalCFrame = nil -- Clear the stored CFrame when disabling
+    end
+
+    return AutoCollectEnabled
+end
+
+-- Button Creation
 CreateButton("ESP", 40, ToggleESP, true)
 CreateButton("Instant Buttons", 80, ToggleInstant, true)
-
-CreateButton("Teleport to Base", 120, TeleportToBase, false)
-CreateButton("Lock Base", 160, TeleportToLockButton, false)
+CreateButton("Auto Collect", 120, ToggleAutoCollect, true)
+CreateButton("Teleport to Base", 160, TeleportToBase, false)
+CreateButton("Lock Base", 200, TeleportToLockButton, false)
 
 local function DeleteAll()
-	if InstantConn then InstantConn:Disconnect() end
-	for _, obj in pairs(Highlights) do
-		if obj.Highlight then obj.Highlight:Destroy() end
-		if obj.Billboard then obj.Billboard:Destroy() end
-	end
-	screenGui:Destroy()
+    -- Stop Instant Buttons connection and reset its state
+    if InstantConn then
+        InstantConn:Disconnect()
+        InstantConn = nil
+    end
+    InstantEnabled = false -- Explicitly set state to false
+
+    -- Stop Auto Collect timer and reset its state and stored CFrame
+    if AutoCollectTimer then
+        task.cancel(AutoCollectTimer)
+        AutoCollectTimer = nil
+    end
+    AutoCollectEnabled = false -- Explicitly set state to false
+    OriginalCFrame = nil -- Clear the stored CFrame
+
+    -- Clean up ESP highlights and reset its state
+    for _, obj in pairs(Highlights) do
+        if obj.Highlight then obj.Highlight:Destroy() end
+        if obj.Billboard then obj.Billboard:Destroy() end
+    end
+    table.clear(Highlights) -- Clear the table holding highlight references
+    ESPEnabled = false -- Explicitly set state to false
+
+    -- Finally, destroy the GUI itself
+    screenGui:Destroy()
 end
 
 local deleteBtn = Instance.new("TextButton")
 deleteBtn.Size = UDim2.new(0, 230, 0, 30)
-deleteBtn.Position = UDim2.new(0, 10, 0, 200)
+deleteBtn.Position = UDim2.new(0, 10, 0, 240)
 deleteBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 deleteBtn.TextColor3 = Color3.new(1, 1, 1)
 deleteBtn.Font = Enum.Font.GothamBold
@@ -205,6 +342,6 @@ deleteBtn.Parent = mainFrame
 deleteBtn.MouseButton1Click:Connect(DeleteAll)
 
 toggleButton.MouseButton1Click:Connect(function()
-	mainFrame.Visible = not mainFrame.Visible
-	toggleButton.Text = mainFrame.Visible and "Close GUI" or "Open GUI"
+    mainFrame.Visible = not mainFrame.Visible
+    toggleButton.Text = mainFrame.Visible and "Close GUI" or "Open GUI"
 end)
