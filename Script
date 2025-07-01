@@ -1,0 +1,227 @@
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+local ESPEnabled, InstantEnabled = false, false
+local Highlights = {}
+local InstantConn = nil
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "LexioiGUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 180, 0, 40)
+toggleButton.Position = UDim2.new(0, 150, 0, 60)  -- чуть ниже сверху
+toggleButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.Text = "Open GUI"
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 18
+toggleButton.Active = true
+toggleButton.Draggable = true
+toggleButton.Parent = screenGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 250, 0, 280)
+mainFrame.Position = UDim2.new(0, 150, 0, 100)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Visible = false
+mainFrame.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundTransparency = 1
+title.Text = "Steal all Pets by Lexioi"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 20
+title.Parent = mainFrame
+
+local function CreateButton(name, posY, callback, toggle)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0, 230, 0, 30)
+	button.Position = UDim2.new(0, 10, 0, posY)
+	button.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.Font = Enum.Font.Gotham
+	button.TextSize = 16
+	button.Text = name .. (toggle and " (OFF)" or "")
+	button.Parent = mainFrame
+
+	button.MouseButton1Click:Connect(function()
+		local on = callback()
+		if toggle then
+			button.BackgroundColor3 = on and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+			button.Text = name .. (on and " (ON)" or " (OFF)")
+		end
+		-- Для не-toggle кнопок цвет и текст не меняется
+	end)
+	return button
+end
+
+-- Поиск базы игрока по DisplayName
+local function GetPlayerPlot()
+	local things_folder = Workspace:FindFirstChild("__THINGS")
+	if not things_folder then return nil end
+	local plots = things_folder:FindFirstChild("Plots")
+	if not plots then return nil end
+
+	for _, v in pairs(plots:GetDescendants()) do
+		if v.Name == "DisplayName" and v:IsA("TextLabel") and v.Text:find(LocalPlayer.DisplayName) then
+			-- Возвращаем модель участка (на 4 уровня выше от DisplayName)
+			local plot = v:FindFirstAncestorOfClass("Model")
+			if plot then
+				return plot
+			end
+		end
+	end
+	return nil
+end
+
+-- ESP
+local function ToggleESP()
+	ESPEnabled = not ESPEnabled
+
+	for _, obj in pairs(Highlights) do
+		if obj.Highlight then obj.Highlight:Destroy() end
+		if obj.Billboard then obj.Billboard:Destroy() end
+	end
+	table.clear(Highlights)
+
+	if ESPEnabled then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+				local highlight = Instance.new("Highlight")
+				highlight.Adornee = player.Character
+				highlight.FillColor = Color3.fromRGB(255, 0, 0)
+				highlight.OutlineColor = Color3.new(1, 1, 1)
+				highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				highlight.Parent = screenGui
+
+				local billboard = Instance.new("BillboardGui")
+				billboard.Name = "ESP_Name"
+				billboard.Adornee = player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
+				billboard.Size = UDim2.new(0, 200, 0, 50)
+				billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+				billboard.AlwaysOnTop = true
+				billboard.Parent = screenGui
+
+				local label = Instance.new("TextLabel", billboard)
+				label.Size = UDim2.new(1, 0, 1, 0)
+				label.BackgroundTransparency = 1
+				label.Text = player.DisplayName
+				label.TextColor3 = Color3.new(1, 1, 1)
+				label.Font = Enum.Font.GothamBold
+				label.TextScaled = true
+
+				table.insert(Highlights, {Highlight = highlight, Billboard = billboard})
+			end
+		end
+	end
+
+	return ESPEnabled
+end
+
+-- Instant Buttons
+local function ToggleInstant()
+	InstantEnabled = not InstantEnabled
+
+	if InstantEnabled then
+		InstantConn = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+			prompt.HoldDuration = 0
+		end)
+	else
+		if InstantConn then
+			InstantConn:Disconnect()
+			InstantConn = nil
+		end
+	end
+
+	return InstantEnabled
+end
+
+-- Телепорт к базе игрока (CollectPart)
+local function TeleportToBase()
+	local plot = GetPlayerPlot()
+	if plot and plot:FindFirstChild("CollectPart") then
+		local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			root.CFrame = plot.CollectPart.CFrame + Vector3.new(0, 3, 0)
+			return true
+		end
+	end
+	return false
+end
+
+-- Телепорт к LockButton базы игрока
+local function TeleportToLockButton()
+	local plot = GetPlayerPlot()
+	if plot and plot:FindFirstChild("LockButton") then
+		local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			root.CFrame = plot.LockButton.CFrame + Vector3.new(0, 3, 0)
+			return true
+		end
+	end
+	return false
+end
+
+-- Авто Стил (телепорт к базе, потом обратно)
+local function AutoSteal()
+	local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not root then return false end
+
+	local originCFrame = root.CFrame
+
+	if TeleportToBase() then
+		task.wait(1)
+		root.CFrame = originCFrame
+		return true
+	end
+	return false
+end
+
+-- Кнопки
+CreateButton("ESP", 40, ToggleESP, true)
+CreateButton("Instant Buttons", 80, ToggleInstant, true)
+
+local tpButton = CreateButton("Teleport to Base", 120, TeleportToBase, false)
+local autoStealButton = CreateButton("Auto Steal", 160, AutoSteal, false)
+
+local lockBaseButton = CreateButton("Lock Base", 200, TeleportToLockButton, false)
+
+local function DeleteAll()
+	if InstantConn then InstantConn:Disconnect() end
+	for _, obj in pairs(Highlights) do
+		if obj.Highlight then obj.Highlight:Destroy() end
+		if obj.Billboard then obj.Billboard:Destroy() end
+	end
+	screenGui:Destroy()
+end
+
+local deleteBtn = Instance.new("TextButton")
+deleteBtn.Size = UDim2.new(0, 230, 0, 30)
+deleteBtn.Position = UDim2.new(0, 10, 0, 240)
+deleteBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
+deleteBtn.TextColor3 = Color3.new(1, 1, 1)
+deleteBtn.Font = Enum.Font.GothamBold
+deleteBtn.TextSize = 16
+deleteBtn.Text = "Delete GUI"
+deleteBtn.Parent = mainFrame
+deleteBtn.MouseButton1Click:Connect(DeleteAll)
+
+toggleButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = not mainFrame.Visible
+	toggleButton.Text = mainFrame.Visible and "Close GUI" or "Open GUI"
+end)
