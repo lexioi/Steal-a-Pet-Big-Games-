@@ -177,29 +177,12 @@ local function TeleportToLockButton()
 	return false
 end
 
--- Авто Стил (телепорт к базе, потом обратно)
-local function AutoSteal()
-	local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-	if not root then return false end
-
-	local originCFrame = root.CFrame
-
-	if TeleportToBase() then
-		task.wait(1)
-		root.CFrame = originCFrame
-		return true
-	end
-	return false
-end
-
 -- Кнопки
 CreateButton("ESP", 40, ToggleESP, true)
 CreateButton("Instant Buttons", 80, ToggleInstant, true)
 
-local tpButton = CreateButton("Teleport to Base", 120, TeleportToBase, false)
-local autoStealButton = CreateButton("Auto Steal", 160, AutoSteal, false)
-
-local lockBaseButton = CreateButton("Lock Base", 200, TeleportToLockButton, false)
+CreateButton("Teleport to Base", 120, TeleportToBase, false)
+CreateButton("Lock Base", 160, TeleportToLockButton, false)
 
 local function DeleteAll()
 	if InstantConn then InstantConn:Disconnect() end
@@ -212,7 +195,7 @@ end
 
 local deleteBtn = Instance.new("TextButton")
 deleteBtn.Size = UDim2.new(0, 230, 0, 30)
-deleteBtn.Position = UDim2.new(0, 10, 0, 240)
+deleteBtn.Position = UDim2.new(0, 10, 0, 200)
 deleteBtn.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
 deleteBtn.TextColor3 = Color3.new(1, 1, 1)
 deleteBtn.Font = Enum.Font.GothamBold
