@@ -1,0 +1,196 @@
+-- Инициализация основных служб
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ID игрока, на которого нужно подписаться (ЗАГЛУШКА: фактически не используется для проверки)
+-- Это просто демонстрация, как бы вы указали целевого пользователя.
+-- В реальном сценарии вы бы получили этот ID из источника, который предоставляет "ключи"
+-- или динамически, но помнить: клиент не может проверить подписку.
+local TARGET_USER_ID = 123456789 -- Замените на реальный ID пользователя, на которого игрок "должен" подписаться
+local TARGET_USER_NAME = "TargetUserDisplayName" -- Замените на отображаемое имя пользователя
+
+-- Переменные для таймера
+local TIMER_DURATION = 300 -- 5 минут в секундах (5 * 60)
+local timerStartTime = nil
+local timerRunning = false
+local timerUpdateConnection = nil
+
+-- === Создание GUI ===
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "KeySystemGUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = PlayerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 350, 0, 180) -- Размер рамки
+mainFrame.Position = UDim2.new(0.5, -175, 0.5, -90) -- Центрирование
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Visible = true -- Изначально видно
+mainFrame.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundTransparency = 1
+title.Text = "Key System"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 20
+title.Parent = mainFrame
+
+local descriptionLabel = Instance.new("TextLabel")
+descriptionLabel.Size = UDim2.new(1, -20, 0, 30)
+descriptionLabel.Position = UDim2.new(0, 10, 0, 35)
+descriptionLabel.BackgroundTransparency = 1
+descriptionLabel.Text = "Follow this user for script:"
+descriptionLabel.TextColor3 = Color3.new(1, 1, 1)
+descriptionLabel.Font = Enum.Font.Gotham
+descriptionLabel.TextSize = 16
+descriptionLabel.TextXAlignment = Enum.TextXAlignment.Left
+descriptionLabel.Parent = mainFrame
+
+local targetUserLabel = Instance.new("TextLabel")
+targetUserLabel.Size = UDim2.new(1, -20, 0, 25)
+targetUserLabel.Position = UDim2.new(0, 10, 0, 60)
+targetUserLabel.BackgroundTransparency = 1
+targetUserLabel.Text = TARGET_USER_NAME -- Отображаем имя пользователя
+targetUserLabel.TextColor3 = Color3.fromRGB(0, 150, 255) -- Синий цвет для имени
+targetUserLabel.Font = Enum.Font.GothamBold
+targetUserLabel.TextSize = 18
+targetUserLabel.TextXAlignment = Enum.TextXAlignment.Left
+targetUserLabel.Parent = mainFrame
+
+local copyNameButton = Instance.new("TextButton")
+copyNameButton.Size = UDim2.new(0, 150, 0, 30)
+copyNameButton.Position = UDim2.new(0, 10, 0, 95)
+copyNameButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+copyNameButton.TextColor3 = Color3.new(1, 1, 1)
+copyNameButton.Text = "Copy Name"
+copyNameButton.Font = Enum.Font.Gotham
+copyNameButton.TextSize = 16
+copyNameButton.Parent = mainFrame
+
+local confirmButton = Instance.new("TextButton")
+confirmButton.Size = UDim2.new(0, 150, 0, 30)
+confirmButton.Position = UDim2.new(1, -160, 0, 95) -- Справа от Copy Name
+confirmButton.BackgroundColor3 = Color3.fromRGB(255, 150, 0) -- Изначально оранжевый, пока таймер не истек
+confirmButton.TextColor3 = Color3.new(1, 1, 1)
+confirmButton.Text = "5:00 Confirm" -- Изначальный текст с таймером
+confirmButton.Font = Enum.Font.Gotham
+confirmButton.TextSize = 16
+confirmButton.Parent = mainFrame
+
+local notificationLabel = Instance.new("TextLabel")
+notificationLabel.Size = UDim2.new(1, -20, 0, 25)
+notificationLabel.Position = UDim2.new(0, 10, 0, 135)
+notificationLabel.BackgroundTransparency = 1
+notificationLabel.Text = "" -- Изначально пусто
+notificationLabel.TextColor3 = Color3.new(1, 1, 1)
+notificationLabel.Font = Enum.Font.Gotham
+notificationLabel.TextSize = 14
+notificationLabel.Visible = false
+notificationLabel.Parent = mainFrame
+
+-- === Функции ===
+
+-- Функция для показа временного уведомления
+local function showNotification(message, duration, color)
+    notificationLabel.Text = message
+    notificationLabel.TextColor3 = color or Color3.new(1, 1, 1) -- Белый по умолчанию
+    notificationLabel.Visible = true
+    task.wait(duration or 2) -- Отображать 2 секунды по умолчанию
+    notificationLabel.Visible = false
+end
+
+-- Функция для обновления таймера
+local function updateTimer()
+    if not timerRunning then return end
+
+    local elapsedTime = os.time() - timerStartTime
+    local remainingTime = math.max(0, TIMER_DURATION - elapsedTime)
+
+    local minutes = math.floor(remainingTime / 60)
+    local seconds = remainingTime % 60
+
+    confirmButton.Text = string.format("%02i:%02i Confirm", minutes, seconds)
+
+    if remainingTime <= 0 then
+        timerRunning = false
+        if timerUpdateConnection then
+            timerUpdateConnection:Disconnect()
+            timerUpdateConnection = nil
+        end
+        confirmButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0) -- Зеленый, когда таймер истек
+        confirmButton.Text = "Confirm" -- Убираем таймер из текста кнопки
+    end
+end
+
+-- Запуск таймера
+local function startTimer()
+    if not timerRunning then
+        timerStartTime = os.time()
+        timerRunning = true
+        timerUpdateConnection = game:GetService("RunService").Heartbeat:Connect(updateTimer)
+        updateTimer() -- Обновить сразу
+    end
+end
+
+-- Функция для копирования имени пользователя
+copyNameButton.MouseButton1Click:Connect(function()
+    pcall(function()
+        UserInputService:SetClipboard(TARGET_USER_NAME)
+    end)
+    showNotification("The name is copied!", 2, Color3.fromRGB(0, 255, 0)) -- Зеленый цвет
+end)
+
+-- Функция для проверки и загрузки скрипта
+confirmButton.MouseButton1Click:Connect(function()
+    local elapsedTime = os.time() - timerStartTime
+    local isTimerEnded = elapsedTime >= TIMER_DURATION
+
+    -- ЭТО ЗАГЛУШКА! КАК УПОМИНАЛОСЬ, ПРОВЕРИТЬ ПОДПИСКУ НАПРЯМУЮ С КЛИЕНТА НЕВОЗМОЖНО.
+    -- Вы можете либо всегда считать, что пользователь подписан, либо использовать более сложную серверную систему.
+    -- Здесь мы просто имитируем успешную проверку.
+    local isUserFollowing = true -- Предполагаем, что пользователь подписан для демонстрации
+
+    if not isTimerEnded then
+        showNotification("The timer has not ended/You don't follow this user", 3, Color3.fromRGB(255, 0, 0)) -- Красный цвет
+    elseif not isUserFollowing then -- Эта часть никогда не сработает из-за isUserFollowing = true
+        showNotification("You don't Follow this user", 3, Color3.fromRGB(255, 0, 0)) -- Красный цвет
+    else
+        showNotification("Checking follow status...", 1, Color3.fromRGB(255, 255, 0)) -- Желтый цвет
+        task.wait(1) -- Небольшая задержка для имитации проверки
+
+        -- Загрузка основного скрипта
+        -- ВАЖНО: loadstring и game:HttpGet будут работать только с инжектором!
+        local success, err = pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/lexioi/Steal-a-Pet-Big-Games-/refs/heads/main/Script"))()
+        end)
+
+        if success then
+            print("Script loaded successfully!")
+            showNotification("Script loaded!", 2, Color3.fromRGB(0, 255, 0))
+            screenGui:Destroy() -- Удаляем меню Key System после загрузки
+        else
+            warn("Failed to load script: " .. tostring(err))
+            showNotification("Failed to load script. (Injector needed?)", 3, Color3.fromRGB(255, 0, 0)) -- Красный цвет
+        end
+    end
+end)
+
+-- Запускаем таймер, когда GUI становится видимым
+mainFrame.Visible = true
+startTimer()
+
+-- Строка, отвечающая за выбор на какого игрока "нужна фолловится":
+-- В данном скрипте это:
+-- local TARGET_USER_ID = 123456789
+-- local TARGET_USER_NAME = "TargetUserDisplayName"
+-- Вы должны заменить 123456789 и "TargetUserDisplayName" на реальный ID и DisplayName пользователя,
+-- на которого, как вы ожидаете, игрок подпишется.
+-- Повторюсь, проверка подписки на стороне клиента невозможна, это лишь для отображения информации.
