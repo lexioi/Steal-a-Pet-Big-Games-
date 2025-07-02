@@ -299,7 +299,7 @@ end
 CreateButton("ESP", 40, ToggleESP, true)
 CreateButton("Instant Buttons", 80, ToggleInstant, true)
 CreateButton("Auto Collect", 120, ToggleAutoCollect, true)
-CreateButton("Teleport to Base", 160, TeleportToBase, false)
+CreateButton("Teleport to Base(when u steal)", 160, TeleportToBase, false)
 CreateButton("Lock Base", 200, TeleportToLockButton, false)
 
 local function DeleteAll()
@@ -329,7 +329,9 @@ local function DeleteAll()
     -- Finally, destroy the GUI itself
     screenGui:Destroy()
 end
-
+local UserInputService = game:GetService("UserInputService")
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
+end
 local deleteBtn = Instance.new("TextButton")
 deleteBtn.Size = UDim2.new(0, 230, 0, 30)
 deleteBtn.Position = UDim2.new(0, 10, 0, 240)
@@ -345,5 +347,3 @@ toggleButton.MouseButton1Click:Connect(function()
     mainFrame.Visible = not mainFrame.Visible
     toggleButton.Text = mainFrame.Visible and "Close GUI" or "Open GUI"
 end)
-local UserInputService = game:GetService("UserInputService")
-local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
